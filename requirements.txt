@@ -1,0 +1,5 @@
+aiogram
+flask
+python-dotenv
+requests
+uvloop ; sys_platform != 'win32'
