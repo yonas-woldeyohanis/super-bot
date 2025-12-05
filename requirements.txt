@@ -2,4 +2,7 @@ aiogram
 flask
 python-dotenv
 requests
+groq
+youtube-transcript-api
+PyPDF2
 uvloop ; sys_platform != 'win32'
