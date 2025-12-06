@@ -49,6 +49,12 @@ def get_ai_response(user_text, user_id):
 
             # Default mode
             "For all other conversations, reply normally with your cheerful personality."
+
+            "1. IMAGE: If user asks to generate an image, reply 'DRAW: <prompt>'.\n"
+                    "2. WEB SEARCH: If the user asks about current events, news, or real-time info (e.g., 'Price of Bitcoin', 'Weather in Addis'), "
+                    "reply EXACTLY: 'SEARCH: <search_query>'.\n"
+                    "Example: User 'Who won the game yesterday?', You reply 'SEARCH: football game results yesterday'.\n"
+                    "For normal chat, just reply normally."
         )
     }
 ]
@@ -81,13 +87,15 @@ def get_ai_response(user_text, user_id):
 def transcribe_audio(audio_file_path):
     """Converts Audio file to Text using Groq Whisper"""
     try:
+        # We use 'whisper-large-v3' which is Multilingual and more robust than the 'en' version
         with open(audio_file_path, "rb") as file:
             transcription = client.audio.transcriptions.create(
                 file=(audio_file_path, file.read()),
-                model="distil-whisper-large-v3-en",  # Fast & Free on Groq
+                model="whisper-large-v3", 
                 response_format="json",
                 temperature=0.0
             )
         return transcription.text
     except Exception as e:
-        return f"Error transcribing audio: {str(e)}"
+        # Return the ACTUAL error so we can debug it
+        return f"SYSTEM_ERROR: {str(e)}"

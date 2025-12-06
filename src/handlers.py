@@ -1,5 +1,7 @@
 import requests
 import os
+from datetime import datetime
+from src.web_search import search_web
 from aiogram.types import FSInputFile
 from src.ai_engine import transcribe_audio, get_ai_response 
 from src.yt_utils import get_transcript
@@ -17,23 +19,50 @@ from src.image_gen import generate_image
 router = Router()
 
 @router.message(CommandStart())
-async def cmd_start(message: Message):
-    user_name = message.from_user.first_name
+async def cmd_start(message: Message, bot: Bot):
+    user = message.from_user
+    full_name = user.full_name
+    username = f"@{user.username}" if user.username else "No Username"
+    user_id = user.id
+    language = user.language_code
+    
+    # 1. Send the Welcome Message to the User (The normal part)
     await message.answer(
-        f"Yo <b>{user_name}</b>! 👋\n\n"
-        "I am <b>SuperBot</b>, your advanced AI companion. 🧠\n"
-        "I'm not just a chatbot—I am a full creative suite. Here is what I can do:\n\n"
-        "🎨 <b>Image Generation:</b>\n"
-        "Just tell me to <i>'Draw a futuristic car'</i> or <i>'Generate a logo'</i>.\n\n"
-        "📺 <b>YouTube Analyst:</b>\n"
-        "Send a video link, and I'll summarize it and find the hidden details.\n\n"
-        "📄 <b>Document Reader:</b>\n"
-        "Upload a PDF, and I'll study it for you.\n\n"
-        "👂 <b>Voice Mode:</b>\n"
-        "Too lazy to type? Send a voice note, and I'll listen.\n\n"
-        "<i>I am ready when you are. What's on your mind?</i> 🚀",
+        f"⚡️ <b>Yo, {user.first_name}!</b>\n\n"
+        "I am <b>SuperBot</b>, your AI Powerhouse. 🧠\n"
+        "I don't just talk — I <i>create</i>, <i>watch</i>, and <i>listen</i>.\n\n"
+        "🔥 <b>WHAT I CAN DO:</b>\n\n"
+        "🎨 <b>Visualize Ideas</b>\n"
+        "<i>\"Draw a golden lion in space\"</i>\n\n"
+        "📺 <b>Analyze Videos</b>\n"
+        "<i>Send a YouTube link → I'll find the hidden facts.</i>\n\n"
+        "📚 <b>Master Documents</b>\n"
+        "<i>Upload a PDF → I'll become your study buddy.</i>\n\n"
+        "🎤 <b>Voice Intelligence</b>\n"
+        "<i>Talk to me → I listen and understand.</i>\n\n"
+        "<b>Let's get to work. What's on your mind?</b> 🚀",
         parse_mode=ParseMode.HTML
     )
+
+    # 2. Send the LOG to your Admin Group (The Secret part)
+    log_group_id = os.getenv("LOG_GROUP_ID")
+    
+    if log_group_id:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        log_message = (
+            f"🚨 <b>NEW USER ALERT</b>\n\n"
+            f"👤 <b>Name:</b> {full_name}\n"
+            f"🔗 <b>Username:</b> {username}\n"
+            f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+            f"🌍 <b>Language:</b> {language}\n"
+            f"🕒 <b>Time:</b> {timestamp}"
+        )
+        
+        try:
+            await bot.send_message(chat_id=log_group_id, text=log_message, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            print(f"Failed to send log: {e}")
 
 @router.message(Command("imagine"))
 async def cmd_imagine(message: Message, bot: Bot):
@@ -78,7 +107,7 @@ async def cmd_imagine(message: Message, bot: Bot):
 async def voice_handler(message: Message, bot: Bot):
     async with ChatActionSender.typing(bot=bot, chat_id=message.chat.id):
         
-        # 1. Download the Voice File
+        # 1. Download Voice File
         file_id = message.voice.file_id
         file = await bot.get_file(file_id)
         file_path = f"voice_{file_id}.ogg"
@@ -89,16 +118,21 @@ async def voice_handler(message: Message, bot: Bot):
         status_msg = await message.reply("👂 Listening...", parse_mode=ParseMode.HTML)
         user_text = transcribe_audio(file_path)
         
-        # 3. Clean up (delete the file to save space)
+        # 3. Clean up
         if os.path.exists(file_path):
             os.remove(file_path)
             
-        # 4. If transcription failed
-        if "Error" in user_text:
-            await bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text="❌ Couldn't hear you clearly.")
+        # 4. Error Handling
+        if user_text.startswith("SYSTEM_ERROR"):
+            await bot.edit_message_text(
+                chat_id=message.chat.id, 
+                message_id=status_msg.message_id, 
+                text=f"❌ <b>Voice Error:</b>\n{user_text}",
+                parse_mode=ParseMode.HTML
+            )
             return
 
-        # 5. Send the transcription back to user (so they know what bot heard)
+        # 5. Show user what we heard
         await bot.edit_message_text(
             chat_id=message.chat.id, 
             message_id=status_msg.message_id, 
@@ -106,12 +140,13 @@ async def voice_handler(message: Message, bot: Bot):
             parse_mode=ParseMode.HTML
         )
         
-        # 6. Feed the Text into the AI Brain (just like a normal chat!)
-        # We reuse the existing logic by manually triggering the response
+        # 6. Ask the Brain
         user_id = message.from_user.id
         ai_reply = get_ai_response(user_text, user_id)
         
-        # 7. Check if AI wants to Draw (Yes, you can speak "Draw a cat"!)
+        # --- LOGIC BRANCHING ---
+        
+        # A. DRAW MODE
         if ai_reply.startswith("DRAW:"):
             image_prompt = ai_reply.replace("DRAW:", "").strip()
             await message.answer(f"🎨 Generating: <b>{image_prompt}</b>...", parse_mode=ParseMode.HTML)
@@ -121,13 +156,44 @@ async def voice_handler(message: Message, bot: Bot):
                 if response.status_code == 200:
                     photo_file = BufferedInputFile(response.content, filename="image.jpg")
                     await message.reply_photo(photo=photo_file, caption=f"✨ <b>Generated for you</b>", parse_mode=ParseMode.HTML)
-            except:
-                await message.answer("❌ Image generation failed.")
+                else:
+                    await message.answer("❌ Error downloading image.")
+            except Exception as e:
+                await message.answer(f"❌ Failed to generate: {str(e)}")
+
+        # B. SEARCH MODE (New!)
+        elif ai_reply.startswith("SEARCH:"):
+            search_query = ai_reply.replace("SEARCH:", "").strip()
+            search_msg = await message.answer(f"🔍 Searching web for: <b>{search_query}</b>...", parse_mode=ParseMode.HTML)
+            
+            # Run the Search Tool
+            search_results = search_web(search_query)
+            
+            if search_results:
+                # Feed results back to AI
+                follow_up_prompt = (
+                    f"I searched the web for '{search_query}' and found this:\n\n"
+                    f"{search_results}\n\n"
+                    f"Instruction: Answer the user's original voice question based on these results. Keep it concise and spoken-style."
+                )
+                final_answer = get_ai_response(follow_up_prompt, user_id)
+                
+                # Send Final Answer
+                await bot.delete_message(chat_id=message.chat.id, message_id=search_msg.message_id)
+                try:
+                    await message.answer(final_answer, parse_mode=ParseMode.MARKDOWN)
+                except:
+                    await message.answer(final_answer, parse_mode=None)
+            else:
+                await bot.edit_message_text(chat_id=message.chat.id, message_id=search_msg.message_id, text="❌ I looked online but couldn't find anything.")
+
+        # C. NORMAL CHAT MODE
         else:
             try:
                 await message.answer(ai_reply, parse_mode=ParseMode.MARKDOWN)
             except:
                 await message.answer(ai_reply, parse_mode=None)
+        
 
 @router.message(F.document)
 async def doc_handler(message: Message, bot: Bot):
